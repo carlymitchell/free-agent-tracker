@@ -60,9 +60,10 @@ if page == "Home":
         ***Data is pulled from [FanGraphs.com](https://www.fangraphs.com) and covers free agents from 2022 - 2025.***  
     """, unsafe_allow_html=True)
 
+
 ####################################
 # SEARCH & COMPARE FREE AGENTS
-elif page == "Search & Compare Free Agents":
+if page == "Search & Compare Free Agents":
     st.title("Search & Compare Free Agents")
     mode = st.radio("Mode", ["Performance Data", "Contract Data"], horizontal=True)
     selected_years = st.multiselect("Select Year(s)", [2022, 2023, 2024, 2025], default=[2025])
@@ -76,8 +77,6 @@ elif page == "Search & Compare Free Agents":
         dfs.append(df)
     
     combined_df = pd.concat(dfs)
-
-    # Display main data with sorting enabled
     st.markdown(f"### {player_type} {mode} for {', '.join(map(str, selected_years))}")
     st.data_editor(combined_df, use_container_width=True)
 
@@ -89,29 +88,86 @@ elif page == "Search & Compare Free Agents":
         max_selections=5
     )
 
-    if len(selected_players) < 2:
-        st.warning("Please select at least 2 players for comparison.")
-    else:
-        st.markdown(f"### {player_type} Comparison for {', '.join(map(str, selected_years))}")
-        comparison_df = combined_df[combined_df["Name"].isin(selected_players)].set_index("Name").transpose()
-        st.data_editor(comparison_df, use_container_width=True)
-
-    # Display Pitch Type Data for Pitchers
     if player_type == "Pitchers":
         st.markdown("### Pitch Type Usage & Performance")
-        pitch_dfs = []
+
+        pitch_types = ["4S", "CT", "2S", "CH", "SL", "CB", "SPLT", "KCB", "XX"]
+        pitch_colors = {
+            "4S": "red",
+            "2S": "yellow",
+            "CH": "purple",
+            "SL": "green",
+            "CB": "blue",
+            "CT": "orange",
+            "SPLT": "pink",
+            "KCB": "brown",
+            "XX": "gray"
+        }
+
+        selected_pitch_data = []
         for year in selected_years:
             pitch_df = data["pitchers"][int(str(year)[-2:])]["pitches"]
-            pitch_df = convert_currency_columns(pitch_df)  # Convert currency columns
-            pitch_dfs.append(pitch_df)
-        
-        selected_pitch_data = pd.concat(pitch_dfs)
-        selected_pitch_data = selected_pitch_data[selected_pitch_data["Name"].isin(selected_players)]
+            pitch_df = convert_currency_columns(pitch_df)
+            pitch_df.columns = pitch_df.columns.str.strip()  # Standardize column names
+            selected_pitch_data.append(pitch_df)
 
+        selected_pitch_data = pd.concat(selected_pitch_data)
+        selected_pitch_data = selected_pitch_data[selected_pitch_data["Name"].isin(selected_players)]
+        
         if not selected_pitch_data.empty:
-            st.data_editor(selected_pitch_data, use_container_width=True)
+            for pitcher in selected_players:
+                st.markdown(f"#### {pitcher}'s Pitch Usage")  # Keep only this title
+
+                pitcher_data = selected_pitch_data[selected_pitch_data["Name"] == pitcher]
+                if pitcher_data.empty:
+                    st.warning(f"No pitch data available for {pitcher}.")
+                    continue
+
+                # Extract pitch data
+                pitch_usage = {pitch: pitcher_data[f"{pitch}%"].values[0] for pitch in pitch_types if f"{pitch}%" in pitcher_data.columns}
+                pitch_velo = {pitch: pitcher_data[f"v{pitch}"].values[0] for pitch in pitch_types if f"v{pitch}" in pitcher_data.columns}
+                pitch_value = {pitch: pitcher_data[f"w{pitch}"].values[0] for pitch in pitch_types if f"w{pitch}" in pitcher_data.columns}
+                pitch_stuff = {pitch: pitcher_data[f"Stf+ {pitch}"].values[0] for pitch in pitch_types if f"Stf+ {pitch}" in pitcher_data.columns}
+
+                # Convert usage % to float
+                pitch_usage = {k: float(str(v).replace("%", "").strip()) for k, v in pitch_usage.items() if isinstance(v, str) and "%" in v and str(v).replace("%", "").replace(".", "").isdigit()}
+
+                if not pitch_usage:
+                    st.warning(f"No valid pitch usage data available for {pitcher}.")
+                    continue
+
+                pitch_summary = pd.DataFrame({
+                    "Pitch Type": list(pitch_usage.keys()),
+                    "Usage%": list(pitch_usage.values()),
+                    "Velo": [pitch_velo.get(k, None) for k in pitch_usage.keys()],
+                    "Value": [pitch_value.get(k, None) for k in pitch_usage.keys()],
+                    "Stf+": [pitch_stuff.get(k, None) for k in pitch_usage.keys()]
+                })
+
+                # Add color mapping for consistent pitch colors
+                color_scale = alt.Scale(domain=list(pitch_colors.keys()), range=list(pitch_colors.values()))
+
+                pie_chart = (
+                    alt.Chart(pitch_summary)
+                    .mark_arc()
+                    .encode(
+                        theta="Usage%:Q",
+                        color=alt.Color("Pitch Type:N", scale=color_scale, legend=alt.Legend(title="Pitch Type")),
+                        tooltip=[
+                            alt.Tooltip("Pitch Type:N", title="Pitch Type"),
+                            alt.Tooltip("Usage%:Q", title="Usage%"),
+                            alt.Tooltip("Velo:Q", title="Velo"),
+                            alt.Tooltip("Value:Q", title="Value"),
+                            alt.Tooltip("Stf+:Q", title="Stf+")
+                        ]
+                    )
+                )
+
+                # Display chart with legend, but without extra title
+                st.altair_chart(pie_chart, use_container_width=True)
         else:
             st.warning("No pitch type data available for the selected players.")
+
 
 ####################################
 # 2025 FREE AGENTS
